@@ -91,7 +91,24 @@ func (a *Auth) Handler() http.Handler {
 	}
 	mux.HandleFunc("GET "+prefix+"/session", a.currentSession)
 	mux.HandleFunc("POST "+prefix+"/sign-out", a.signOut)
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A public sibling subdomain is same-site, so SameSite=Lax does not
+		// protect cookie-authenticated mutations. OAuth callbacks are bound to
+		// their one-time flow cookie and must accept provider cross-origin POSTs.
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions &&
+			!strings.HasPrefix(r.URL.Path, prefix+"/callback/") {
+			if _, err := r.Cookie(a.sessionCookieName()); err == nil {
+				origin := r.Header.Get("Origin")
+				fetchSite := r.Header.Get("Sec-Fetch-Site")
+				if (origin != "" && origin != a.config.BaseURL) ||
+					(origin == "" && (fetchSite == "same-site" || fetchSite == "cross-site")) {
+					http.Error(w, "invalid origin", http.StatusForbidden)
+					return
+				}
+			}
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func (a *Auth) signUpEmail(w http.ResponseWriter, r *http.Request) {

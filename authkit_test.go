@@ -231,6 +231,53 @@ func TestHTTPSessionCookieCannotBeSetBySiblingSubdomain(t *testing.T) {
 	}
 }
 
+func TestCookieMutationRejectsSiblingOrigin(t *testing.T) {
+	m := newMemory()
+	a, err := New(context.Background(), Config{BaseURL: "https://terminal.azdelphi.com", Storage: Storage{Users: m, Sessions: sessionMemory{m}, Flows: m, SocialAccounts: m}, EmailAndPassword: EmailAndPassword{Enabled: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := a.Handler()
+	created := request(handler, http.MethodPost, "/api/auth/sign-up/email", `{"email":"user@example.com","password":"password123","name":"Test User"}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("signup: %d %s", created.Code, created.Body.String())
+	}
+	var session *http.Cookie
+	for _, cookie := range created.Result().Cookies() {
+		if cookie.Name == hostSessionCookie {
+			session = cookie
+		}
+	}
+	if session == nil {
+		t.Fatal("session cookie missing")
+	}
+	mutate := func(origin, fetchSite string) int {
+		r := httptest.NewRequest(http.MethodPost, "/api/auth/sign-out", nil)
+		r.AddCookie(session)
+		if origin != "" {
+			r.Header.Set("Origin", origin)
+		}
+		if fetchSite != "" {
+			r.Header.Set("Sec-Fetch-Site", fetchSite)
+		}
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w.Code
+	}
+	if got := mutate("https://attacker.example.azdelphi.com", "same-site"); got != http.StatusForbidden {
+		t.Fatalf("sibling origin: %d", got)
+	}
+	if got := mutate("", "same-site"); got != http.StatusForbidden {
+		t.Fatalf("missing sibling origin: %d", got)
+	}
+	if got := request(handler, http.MethodGet, "/api/auth/session", "", session); got.Code != http.StatusOK {
+		t.Fatalf("session unexpectedly revoked: %d", got.Code)
+	}
+	if got := mutate("https://terminal.azdelphi.com", "same-origin"); got != http.StatusOK {
+		t.Fatalf("same origin rejected: %d", got)
+	}
+}
+
 type fakeSocial struct{}
 
 func (fakeSocial) Begin() (string, social.Pending, error) {
