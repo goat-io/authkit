@@ -308,6 +308,38 @@ func TestSocialCallbackConsumesFlow(t *testing.T) {
 	}
 }
 
+func TestHTTPSocialFlowCookieCannotBeSetBySiblingSubdomain(t *testing.T) {
+	m := newMemory()
+	a, err := New(context.Background(), Config{BaseURL: "https://terminal.azdelphi.com", Storage: Storage{Users: m, Sessions: sessionMemory{m}, Flows: m, SocialAccounts: m}, EmailAndPassword: EmailAndPassword{Enabled: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Social = identity.NewSocialLoginService(m, a.Sessions)
+	a.providers[social.Google] = fakeSocial{}
+	handler := a.Handler()
+	start := request(handler, http.MethodGet, "/api/auth/sign-in/social/google", "")
+	if start.Code != http.StatusFound {
+		t.Fatalf("start: %d %s", start.Code, start.Body.String())
+	}
+	var flow *http.Cookie
+	for _, c := range start.Result().Cookies() {
+		if c.Name == "__Host-"+flowCookieName(social.Google) {
+			flow = c
+		}
+	}
+	if flow == nil || flow.Value == "" || !flow.Secure || !flow.HttpOnly || flow.Path != "/" || flow.Domain != "" {
+		t.Fatalf("HTTPS flow must be host-bound: %+v", flow)
+	}
+	legacy := *flow
+	legacy.Name = flowCookieName(social.Google)
+	if got := request(handler, http.MethodGet, "/api/auth/callback/google?state=state&code=code", "", &legacy); got.Code != http.StatusBadRequest {
+		t.Fatalf("parent-domain cookie accepted: %d", got.Code)
+	}
+	if got := request(handler, http.MethodGet, "/api/auth/callback/google?state=state&code=code", "", flow); got.Code != http.StatusSeeOther {
+		t.Fatalf("host-bound cookie rejected: %d %s", got.Code, got.Body.String())
+	}
+}
+
 func TestSocialSignInRequiresConfiguredMFA(t *testing.T) {
 	m := newMemory()
 	signer, _, err := eddsa.Generate()
