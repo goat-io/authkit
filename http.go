@@ -69,6 +69,15 @@ func (a *Auth) Handler() http.Handler {
 		mux.HandleFunc("POST "+prefix+"/organization/create", a.createOrganization)
 		mux.HandleFunc("GET "+prefix+"/organization/list", a.listOrganizations)
 	}
+	if a.config.Storage.Teams != nil {
+		mux.HandleFunc("GET "+prefix+"/organization/{orgId}/teams", a.listTeams)
+		mux.HandleFunc("POST "+prefix+"/organization/{orgId}/teams", a.createTeam)
+		mux.HandleFunc("GET "+prefix+"/organization/{orgId}/teams/{teamId}", a.getTeam)
+		mux.HandleFunc("DELETE "+prefix+"/organization/{orgId}/teams/{teamId}", a.deleteTeam)
+		mux.HandleFunc("GET "+prefix+"/organization/{orgId}/teams/{teamId}/members", a.listTeamMembers)
+		mux.HandleFunc("PUT "+prefix+"/organization/{orgId}/teams/{teamId}/members/{userId}", a.putTeamMember)
+		mux.HandleFunc("DELETE "+prefix+"/organization/{orgId}/teams/{teamId}/members/{userId}", a.deleteTeamMember)
+	}
 	mux.HandleFunc("GET "+prefix+"/session", a.currentSession)
 	mux.HandleFunc("POST "+prefix+"/sign-out", a.signOut)
 	return mux
