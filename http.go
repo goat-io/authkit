@@ -242,7 +242,7 @@ func (a *Auth) finishSocial(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	cookie, err := r.Cookie(flowCookieName(name))
+	cookie, err := r.Cookie(a.flowCookieName(name))
 	a.setFlowCookie(w, name, "", -1, name == social.Apple)
 	if err != nil {
 		http.Error(w, "invalid callback", http.StatusBadRequest)
@@ -442,13 +442,26 @@ func (a *Auth) clearMFAChallenge(w http.ResponseWriter) {
 
 func flowCookieName(provider string) string { return "authkit.oauth." + provider }
 
+func (a *Auth) flowCookieName(provider string) string {
+	if a.secure {
+		return "__Host-" + flowCookieName(provider)
+	}
+	return flowCookieName(provider)
+}
+
 func (a *Auth) setFlowCookie(w http.ResponseWriter, provider, value string, age int, crossSite bool) {
 	sameSite := http.SameSiteLaxMode
 	if crossSite {
 		sameSite = http.SameSiteNoneMode
 	}
-	http.SetCookie(w, &http.Cookie{Name: flowCookieName(provider), Value: value,
-		Path: a.basePath + "/callback/" + provider, HttpOnly: true, Secure: a.secure,
+	path := a.basePath + "/callback/" + provider
+	if a.secure {
+		// __Host- cookies must be Secure, host-only, and scoped to /. A
+		// sibling public site must not be able to replace an OAuth flow.
+		path = "/"
+	}
+	http.SetCookie(w, &http.Cookie{Name: a.flowCookieName(provider), Value: value,
+		Path: path, HttpOnly: true, Secure: a.secure,
 		SameSite: sameSite, MaxAge: age})
 }
 
