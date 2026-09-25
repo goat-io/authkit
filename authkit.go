@@ -72,6 +72,7 @@ type SocialProvider struct {
 // OrgID must refer to an existing organization.
 type OIDCProvider struct {
 	OrgID        string
+	Domain       string // verified email domain; enforced for managed connections
 	IssuerURL    string
 	ClientID     string
 	ClientSecret string
@@ -107,6 +108,7 @@ type Auth struct {
 	secure           bool
 	providers        map[string]socialFlow
 	ssoOrganizations map[string]string
+	ssoDomains       map[string]string
 	config           Config
 }
 
@@ -137,6 +139,9 @@ func (a *Auth) SignInWithIDToken(ctx context.Context, provider, rawIDToken, expe
 	person, err := verifier.VerifyIDToken(ctx, rawIDToken, expectedNonce)
 	if err != nil {
 		return identity.LoginResult{}, err
+	}
+	if domain := a.ssoDomains[provider]; domain != "" && !validSSOEmail(person, domain) {
+		return identity.LoginResult{}, errors.New("authkit: organization email was not verified by the identity provider")
 	}
 	userID, err := a.Social.Resolve(ctx, person)
 	if err != nil {
@@ -207,7 +212,7 @@ func New(ctx context.Context, cfg Config) (*Auth, error) {
 			return nil, errors.New("authkit: membership store must support EnsureMembership")
 		}
 	}
-	a := &Auth{basePath: cfg.BasePath, secure: base.Scheme == "https", config: cfg, providers: make(map[string]socialFlow), ssoOrganizations: make(map[string]string)}
+	a := &Auth{basePath: cfg.BasePath, secure: base.Scheme == "https", config: cfg, providers: make(map[string]socialFlow), ssoOrganizations: make(map[string]string), ssoDomains: make(map[string]string)}
 	a.Sessions = identity.NewSessionService(cfg.Storage.Sessions, cfg.Storage.Users, cfg.Storage.Memberships, 0)
 	a.Authenticator = identity.NewAuthenticator(cfg.AdminToken, cfg.Signer).WithSessions(a.Sessions)
 	if cfg.EmailAndPassword.Enabled {
@@ -245,6 +250,13 @@ func New(ctx context.Context, cfg Config) (*Auth, error) {
 			}
 			a.providers[name] = p
 			a.ssoOrganizations[name] = c.OrgID
+			if c.Domain != "" {
+				domain, err := identity.NormalizeSSODomain(c.Domain)
+				if err != nil {
+					return nil, fmt.Errorf("authkit: SSO %s: %w", name, err)
+				}
+				a.ssoDomains[name] = domain
+			}
 		}
 		a.membershipWriter, _ = cfg.Storage.Memberships.(membershipProvisioner)
 	}

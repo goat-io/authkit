@@ -247,6 +247,12 @@ func (a *Auth) finishSocial(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid callback", http.StatusBadRequest)
 		return
 	}
+	if domain := a.ssoDomains[name]; domain != "" {
+		if !validSSOEmail(person, domain) {
+			http.Error(w, "organization email was not verified by the identity provider", http.StatusForbidden)
+			return
+		}
+	}
 	if flow.LinkUserID != "" {
 		if err := a.Social.Link(r.Context(), identity.Principal{Kind: identity.KindUser, Subject: flow.LinkUserID}, person); err != nil {
 			http.Error(w, "unable to link social account", http.StatusConflict)
@@ -282,6 +288,11 @@ func (a *Auth) finishSocial(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, a.config.BaseURL+"/", http.StatusSeeOther)
+}
+
+func validSSOEmail(person identity.SocialIdentity, domain string) bool {
+	parts := strings.Split(strings.ToLower(person.Email), "@")
+	return person.EmailVerified && len(parts) == 2 && parts[0] != "" && parts[1] == domain
 }
 
 func (a *Auth) currentSession(w http.ResponseWriter, r *http.Request) {
