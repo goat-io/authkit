@@ -5,7 +5,7 @@ Authkit is a Go authentication toolkit you configure once and mount as an HTTP h
 Requires Go 1.25 or newer.
 
 ```sh
-go get github.com/goat-io/authkit
+go get github.com/goat-io/authkit@v0.1.0
 ```
 
 ## One-config setup
@@ -135,6 +135,12 @@ Register `https://your-app.example/api/auth/callback/acme` as the redirect URI a
 The configured handler is optional. `identity` defines the session, machine credential, MFA, organization, and storage interfaces. `social` exposes provider flows; `webauthn/gowebauthn` exposes passkey ceremonies; `token/eddsa` signs machine JWTs and MFA challenges. `store/postgres` supplies the schema and store implementations. `transport/nethttp` and `transport/fiber` remain available when you own the HTTP routes.
 
 For machine clients, create `identity.NewCredentialService(postgres.NewCredentials(pool), signer, ttl)`. `Mint` returns a durable secret once; `Exchange` trades it for a short-lived JWT. Revoking the secret stops future exchanges, while already-issued JWTs remain valid until expiry. The `Authenticator` resolves machine JWTs, user sessions, and an optional admin token to one `Principal`.
+
+## Releases
+
+Go modules are distributed from Git tags; there is no separate package upload. CI runs module checks, vet, and the race-enabled test suite against PostgreSQL for pull requests, `main`, and version tags. After a version tag passes, CI creates a GitHub release. To publish the next version, merge the changes to `main`, then create and push an immutable semantic version tag such as `v0.1.1`. Consumers can pin a version with `go get github.com/goat-io/authkit@v0.1.1`.
+
+The `v0` series is for refining the public API. A future `v1.0.0` will signal a stable compatibility commitment; breaking changes after that require a new major module path such as `/v2`.
 
 ## Operational notes
 
