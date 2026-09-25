@@ -22,6 +22,16 @@ CREATE TABLE IF NOT EXISTS authkit_orgs (
   name TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS authkit_sso_connections (
+  org_id TEXT PRIMARY KEY REFERENCES authkit_orgs(id) ON DELETE CASCADE,
+  domain TEXT NOT NULL,
+  issuer_url TEXT NOT NULL,
+  client_id TEXT NOT NULL,
+  client_secret TEXT NOT NULL,
+  verification_token TEXT NOT NULL,
+  verified_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS authkit_sso_verified_domain ON authkit_sso_connections(domain) WHERE verified_at IS NOT NULL;
 CREATE TABLE IF NOT EXISTS authkit_users (
   id TEXT PRIMARY KEY,
   email TEXT UNIQUE,
