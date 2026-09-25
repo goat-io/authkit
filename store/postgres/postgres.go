@@ -61,6 +61,23 @@ CREATE TABLE IF NOT EXISTS authkit_memberships (
   role TEXT NOT NULL DEFAULT 'member',
   PRIMARY KEY (user_id, org_id)
 );
+CREATE TABLE IF NOT EXISTS authkit_teams (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES authkit_orgs(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (org_id, slug),
+  UNIQUE (id, org_id)
+);
+CREATE TABLE IF NOT EXISTS authkit_team_memberships (
+  team_id TEXT NOT NULL REFERENCES authkit_teams(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES authkit_users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'member')),
+  PRIMARY KEY (team_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_authkit_teams_org ON authkit_teams(org_id);
+CREATE INDEX IF NOT EXISTS idx_authkit_team_memberships_user ON authkit_team_memberships(user_id);
 CREATE TABLE IF NOT EXISTS authkit_credentials (
   id TEXT PRIMARY KEY,
   secret_hash TEXT UNIQUE NOT NULL,

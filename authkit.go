@@ -33,6 +33,7 @@ type Storage struct {
 	Recovery       identity.RecoveryStore
 	Passkeys       identity.WebAuthnCredentialStore
 	Organizations  identity.OrgStore
+	Teams          identity.TeamStore
 }
 
 // FlowStore keeps short-lived, one-time OAuth and passkey challenges. Take must
@@ -49,7 +50,7 @@ func Postgres(pool *pgxpool.Pool) Storage {
 		Users:   postgres.NewUsers(pool), Sessions: postgres.NewSessions(pool),
 		Memberships: postgres.NewMemberships(pool), SocialAccounts: postgres.NewSocialAccounts(pool),
 		MFA: postgres.NewMFA(pool), Recovery: postgres.NewMFARecovery(pool),
-		Passkeys: postgres.NewWebAuthnCredentials(pool), Organizations: postgres.NewOrgs(pool),
+		Passkeys: postgres.NewWebAuthnCredentials(pool), Organizations: postgres.NewOrgs(pool), Teams: postgres.NewTeams(pool),
 	}
 }
 
