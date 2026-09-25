@@ -201,6 +201,36 @@ func TestConfiguredEmailRoutesAndMiddleware(t *testing.T) {
 	}
 }
 
+func TestHTTPSessionCookieCannotBeSetBySiblingSubdomain(t *testing.T) {
+	m := newMemory()
+	a, err := New(context.Background(), Config{BaseURL: "https://terminal.azdelphi.com", Storage: Storage{Users: m, Sessions: sessionMemory{m}, Flows: m, SocialAccounts: m}, EmailAndPassword: EmailAndPassword{Enabled: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := a.Handler()
+	created := request(handler, http.MethodPost, "/api/auth/sign-up/email", `{"email":"user@example.com","password":"password123","name":"Test User"}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("signup: %d %s", created.Code, created.Body.String())
+	}
+	var cookie *http.Cookie
+	for _, c := range created.Result().Cookies() {
+		if c.Name == hostSessionCookie {
+			cookie = c
+		}
+	}
+	if cookie == nil || !cookie.Secure || !cookie.HttpOnly || cookie.Path != "/" || cookie.Domain != "" {
+		t.Fatalf("HTTPS session must be host-bound: %+v", cookie)
+	}
+	legacy := *cookie
+	legacy.Name = sessionCookie
+	if got := request(handler, http.MethodGet, "/api/auth/session", "", &legacy); got.Code != http.StatusUnauthorized {
+		t.Fatalf("legacy parent-domain cookie authenticated: %d", got.Code)
+	}
+	if got := request(handler, http.MethodGet, "/api/auth/session", "", cookie); got.Code != http.StatusOK {
+		t.Fatalf("host-bound cookie failed: %d", got.Code)
+	}
+}
+
 type fakeSocial struct{}
 
 func (fakeSocial) Begin() (string, social.Pending, error) {

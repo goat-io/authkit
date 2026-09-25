@@ -15,6 +15,17 @@ import (
 )
 
 const sessionCookie = "authkit.session"
+const hostSessionCookie = "__Host-authkit.session"
+
+// HTTPS sessions use the __Host- prefix so a sibling subdomain cannot set a
+// parent-domain cookie with the same name. HTTP local development keeps the
+// unprefixed cookie because browsers require Secure for __Host- cookies.
+func (a *Auth) sessionCookieName() string {
+	if a.secure {
+		return hostSessionCookie
+	}
+	return sessionCookie
+}
 
 type principalKey struct{}
 
@@ -25,7 +36,7 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 		token := ""
 		if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 			token = strings.TrimPrefix(h, "Bearer ")
-		} else if c, err := r.Cookie(sessionCookie); err == nil {
+		} else if c, err := r.Cookie(a.sessionCookieName()); err == nil {
 			token = c.Value
 		}
 		p := a.Authenticator.Authenticate(r.Context(), token)
@@ -314,7 +325,7 @@ func (a *Auth) currentSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Auth) signOut(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie(sessionCookie); err == nil {
+	if cookie, err := r.Cookie(a.sessionCookieName()); err == nil {
 		_ = a.Sessions.Logout(r.Context(), cookie.Value)
 	}
 	a.clearSession(w)
@@ -391,7 +402,7 @@ func (a *Auth) confirmTwoFactor(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Auth) principal(r *http.Request) (identity.Principal, bool) {
-	cookie, err := r.Cookie(sessionCookie)
+	cookie, err := r.Cookie(a.sessionCookieName())
 	if err != nil {
 		return identity.Principal{}, false
 	}
@@ -399,11 +410,11 @@ func (a *Auth) principal(r *http.Request) (identity.Principal, bool) {
 }
 
 func (a *Auth) setSession(w http.ResponseWriter, token string) {
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: token, Path: "/", HttpOnly: true, Secure: a.secure, SameSite: http.SameSiteLaxMode, MaxAge: 30 * 24 * 60 * 60})
+	http.SetCookie(w, &http.Cookie{Name: a.sessionCookieName(), Value: token, Path: "/", HttpOnly: true, Secure: a.secure, SameSite: http.SameSiteLaxMode, MaxAge: 30 * 24 * 60 * 60})
 }
 
 func (a *Auth) clearSession(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Path: "/", HttpOnly: true, Secure: a.secure, SameSite: http.SameSiteLaxMode, MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: a.sessionCookieName(), Path: "/", HttpOnly: true, Secure: a.secure, SameSite: http.SameSiteLaxMode, MaxAge: -1})
 }
 
 func (a *Auth) issueSessionOrChallenge(w http.ResponseWriter, r *http.Request, userID string) (bool, error) {
