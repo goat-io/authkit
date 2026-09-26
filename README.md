@@ -5,10 +5,10 @@ Authkit is a Go authentication toolkit you configure once and mount as an HTTP h
 Requires Go 1.25 or newer.
 
 ```sh
-go get github.com/goat-io/authkit@v0.1.0
+go get github.com/goat-io/authkit@latest
 ```
 
-The team and managed SSO APIs below were added after `v0.1.0`. Until the next release, use `go get github.com/goat-io/authkit@main` to try them, or pin the resulting commit-based version.
+Teams and managed SSO require `v0.2.0` or newer. Pin a specific tag instead of `@latest` when you need reproducible builds.
 
 ## One-config setup
 
@@ -147,7 +147,7 @@ For machine clients, create `identity.NewCredentialService(postgres.NewCredentia
 
 ## Releases
 
-Go modules are distributed from Git tags; there is no separate package upload. CI runs module checks, vet, and the race-enabled test suite against PostgreSQL for pull requests, `main`, and version tags. After a version tag passes, CI creates a GitHub release. To publish the next version, merge the changes to `main`, then create and push an immutable semantic version tag such as `v0.1.1`. Consumers can pin a version with `go get github.com/goat-io/authkit@v0.1.1`.
+Go modules are distributed from Git tags; there is no separate package upload. CI runs module checks, vet, and the race-enabled test suite against PostgreSQL for pull requests, `main`, and version tags. After a version tag passes, CI creates a GitHub release. To publish the next version, merge the changes to `main`, then create and push an immutable semantic version tag. Consumers can install `@latest` and keep the version recorded in their `go.mod`, or request a specific tag.
 
 The `v0` series is for refining the public API. A future `v1.0.0` will signal a stable compatibility commitment; breaking changes after that require a new major module path such as `/v2`.
 

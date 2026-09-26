@@ -2,7 +2,7 @@
 
 Authkit stores organization membership separately from team membership. An organization owner can create teams and configure an OIDC connection; a team owner can manage that team's members. `authkit.Postgres(pool)` supplies the organization, team, and SSO stores and migrates their tables when passed to `authkit.New`.
 
-The APIs on this page were added after `v0.1.0`. Until the next tagged release, use `go get github.com/goat-io/authkit@main` to try them, or pin the resulting commit-based version.
+These APIs are available from `v0.2.0`. Install the latest tagged release with `go get github.com/goat-io/authkit@latest`, or pin a specific version for reproducible builds.
 
 ## Teams
 
