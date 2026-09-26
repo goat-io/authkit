@@ -1,12 +1,14 @@
 # authkit
 
-Authkit is a Go authentication toolkit you configure once and mount as an HTTP handler. It includes email/password login, social sign-in, sessions, and optional two-factor, passkey, and organization features. The default PostgreSQL adapter creates and migrates its tables; the core services remain available for custom storage and frameworks.
+Authkit is a Go authentication toolkit you configure once and mount as an HTTP handler. It includes email/password login, social sign-in, sessions, and optional two-factor, passkey, organization, team, and organization-owned OIDC SSO features. The default PostgreSQL adapter creates and migrates its tables; the core services remain available for custom storage and frameworks.
 
 Requires Go 1.25 or newer.
 
 ```sh
 go get github.com/goat-io/authkit@v0.1.0
 ```
+
+The team and managed SSO APIs below were added after `v0.1.0`. Until the next release, use `go get github.com/goat-io/authkit@main` to try them, or pin the resulting commit-based version.
 
 ## One-config setup
 
@@ -89,9 +91,10 @@ func main() {
 | Two-factor plugin | `POST /two-factor/enroll`, `POST /two-factor/confirm`, `POST /two-factor/complete` |
 | Passkey plugin | `POST /passkey/register/begin`, `/register/finish`, `/sign-in/begin`, `/sign-in/finish` |
 | Organization plugin | `POST /organization/create`, `GET /organization/list` |
+| Teams (when `Storage.Teams` is set) | `GET/POST /organization/{orgId}/teams`, `GET/DELETE /organization/{orgId}/teams/{teamId}`, `GET /organization/{orgId}/teams/{teamId}/members`, `PUT/DELETE /organization/{orgId}/teams/{teamId}/members/{userId}` |
 | Always | `GET /session`, `POST /sign-out` |
 
-Email/password and passkey requests use JSON. The passkey `begin` routes return browser credential options; the `finish` routes accept the browser's raw credential response JSON. Social start and link routes redirect the browser to the provider. `POST /link/social/{provider}` requires an authenticated session and an `Origin` header matching `BaseURL` (a same-origin HTML form works). The callback sets an HTTP-only session cookie and redirects to `BaseURL`.
+Email/password and passkey requests use JSON. The passkey `begin` routes return browser credential options; the `finish` routes accept the browser's raw credential response JSON. Social start and link routes redirect the browser to the provider. `POST /link/social/{provider}` requires an authenticated session and an `Origin` header matching `BaseURL` (a same-origin HTML form works). The callback sets an HTTP-only session cookie and redirects to `BaseURL`. On HTTPS, session and OAuth flow cookies use the host-bound `__Host-` prefix. Cookie-authenticated mutations reject a mismatched `Origin` or a same-site/cross-site `Sec-Fetch-Site` value when `Origin` is absent.
 
 When two-factor is enabled and a user has enrolled TOTP, password, social, and passkey sign-ins return an MFA challenge instead of a session. Browser flows store that challenge in a short-lived HTTP-only cookie and redirect with `?authkit_mfa=required` where needed. Submit `{"code":"123456"}` to `POST /two-factor/complete`; an API client can also pass the challenge in the JSON body. Only the completed challenge creates a session.
 
@@ -128,9 +131,13 @@ OrganizationSSO: map[string]authkit.OIDCProvider{
 
 Register `https://your-app.example/api/auth/callback/acme` as the redirect URI at the identity provider, then direct users to `GET /api/auth/sign-in/sso/acme`. Authkit discovers the issuer's OIDC endpoints and signing keys, uses authorization code with PKCE, and checks the signed ID token's issuer, audience, expiry, and nonce. After successful verification, it adds the user to `org_acme` with the `member` role; an existing role is preserved. If the email belongs to an existing account, the user must sign in first and explicitly link it with `POST /api/auth/link/sso/acme` (same-origin request). The connection name, issuer, and organization ID isolate account identities, so reusing a name for another issuer or organization does not silently transfer accounts.
 
-For self-service setup, use `authkit.NewManagedSSO(postgres.NewSSOConnections(pool), key)` with a persistent 32-byte encryption key. The application authenticates requests and passes the user's `identity.Principal` to `Configure`, `Get`, `Verify`, and `Delete`; only an organization owner or admin may manage its connection. `Configure` stores the client secret encrypted and returns a DNS TXT challenge at `_authkit-sso.<domain>`. `Verify` checks that record before the domain can be discovered. `Discover(ctx, email)` returns the matching organization ID for verified domains, and `Active(ctx)` returns verified connections for the OAuth adapter. Never send `Active` results to a browser. Use a distinct provider name for each organization, configure `OIDCProvider.Domain`, and register the corresponding callback URI with the identity provider. Authkit checks that the returned OIDC identity has a verified email in that domain before granting organization membership. Reconfiguring an issuer, client, or domain revokes verification until the new DNS proof succeeds.
+For organization-managed setup, `authkit.NewManagedSSO(postgres.NewSSOConnections(pool), key)` manages encrypted client secrets and DNS ownership proof. Your application supplies its own admin and email-discovery endpoints, then loads verified connections into `Config.OrganizationSSO`. Use `authkit.SSOProviderName(orgID)` for a stable callback name and set `OIDCProvider.Domain` so sign-in requires a provider-verified email in that domain. A connection change must be reverified and the `Auth` instance refreshed; managed connections are not hot-loaded automatically. See the [organizations and SSO guide](docs/organizations.md) for the complete setup and route examples.
 
 The issuer must be HTTPS and serve standard OIDC discovery. Plain OAuth 2.0 without OIDC identity tokens and SAML are separate integrations. An application should also rate-limit the public email-discovery endpoint and refresh its active-provider cache after connection changes.
+
+## Teams
+
+`authkit.Postgres(pool)` includes the team store, so mounting `Auth.Handler()` enables team routes. Teams belong to one organization, have a unique slug within that organization, and support `owner`, `admin`, and `member` roles. Organization owners/admins can create teams and see all teams; other organization members see only teams they belong to. Team owners/admins and organization owners/admins can manage membership, but the team owner cannot be removed or downgraded through the member routes. Users must already belong to the organization before they can be added to a team. See the [organizations and SSO guide](docs/organizations.md) for requests and authorization rules.
 
 ## Lower-level packages
 
