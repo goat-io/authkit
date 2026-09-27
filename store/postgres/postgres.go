@@ -96,6 +96,13 @@ CREATE TABLE IF NOT EXISTS authkit_sessions (
   expires_at TIMESTAMPTZ NOT NULL,
   step_up BOOLEAN NOT NULL DEFAULT false
 );
+CREATE TABLE IF NOT EXISTS authkit_email_otps (
+  email TEXT PRIMARY KEY,
+  code_hash BYTEA NOT NULL,
+  sent_at TIMESTAMPTZ NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS authkit_mfa (
   subject TEXT PRIMARY KEY,
   secret TEXT NOT NULL,
@@ -213,7 +220,11 @@ func (s *Users) scan(row pgx.Row) (identity.User, error) {
 }
 
 func (s *Users) GetByEmail(ctx context.Context, email string) (identity.User, error) {
-	return s.scan(s.pool.QueryRow(ctx, `SELECT id, COALESCE(email,''), display_name, password_hash, created_at FROM authkit_users WHERE email=$1`, email))
+	u, err := s.scan(s.pool.QueryRow(ctx, `SELECT id, COALESCE(email,''), display_name, password_hash, created_at FROM authkit_users WHERE email=$1`, email))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return u, errors.Join(identity.ErrUserNotFound, err)
+	}
+	return u, err
 }
 
 func (s *Users) GetByID(ctx context.Context, id string) (identity.User, error) {
