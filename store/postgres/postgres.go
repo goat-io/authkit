@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS authkit_users (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE authkit_users ALTER COLUMN email DROP NOT NULL;
+ALTER TABLE authkit_orgs ADD COLUMN IF NOT EXISTS personal_owner_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS authkit_one_personal_org_per_user ON authkit_orgs(personal_owner_id) WHERE personal_owner_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS authkit_social_accounts (
   provider TEXT NOT NULL,
   subject TEXT NOT NULL,
@@ -469,6 +471,26 @@ func (s *Orgs) CreateForUser(ctx context.Context, o identity.Org, userID string)
 	return tx.Commit(ctx)
 }
 
+// CreatePersonalForUser creates exactly one private organization per user.
+// The unique index keeps concurrent requests from creating two personal homes.
+func (s *Orgs) CreatePersonalForUser(ctx context.Context, o identity.Org, userID string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `INSERT INTO authkit_orgs(id,name,personal_owner_id,created_at) VALUES ($1,$2,$3,$4)`, o.ID, o.Name, userID, o.CreatedAt); err != nil {
+		if uniqueConstraint(err, "authkit_one_personal_org_per_user") {
+			return identity.ErrPersonalOrgExists
+		}
+		return err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO authkit_memberships(user_id,org_id,role) VALUES ($1,$2,'owner')`, userID, o.ID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 var _ identity.OrgStore = (*Orgs)(nil)
 
 func (s *Orgs) Create(ctx context.Context, o identity.Org) error {
@@ -478,7 +500,7 @@ func (s *Orgs) Create(ctx context.Context, o identity.Org) error {
 
 func (s *Orgs) GetByID(ctx context.Context, id string) (identity.Org, bool, error) {
 	var o identity.Org
-	err := s.pool.QueryRow(ctx, `SELECT id, name, is_operator, created_at FROM authkit_orgs WHERE id=$1`, id).Scan(&o.ID, &o.Name, &o.Operator, &o.CreatedAt)
+	err := s.pool.QueryRow(ctx, `SELECT id, name, is_operator, COALESCE(personal_owner_id,''), created_at FROM authkit_orgs WHERE id=$1`, id).Scan(&o.ID, &o.Name, &o.Operator, &o.PersonalOwnerID, &o.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return identity.Org{}, false, nil
 	}
@@ -489,7 +511,7 @@ func (s *Orgs) GetByID(ctx context.Context, id string) (identity.Org, bool, erro
 }
 
 func (s *Orgs) List(ctx context.Context) ([]identity.Org, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, name, is_operator, created_at FROM authkit_orgs ORDER BY created_at`)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, is_operator, COALESCE(personal_owner_id,''), created_at FROM authkit_orgs ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -497,7 +519,7 @@ func (s *Orgs) List(ctx context.Context) ([]identity.Org, error) {
 	var out []identity.Org
 	for rows.Next() {
 		var o identity.Org
-		if err := rows.Scan(&o.ID, &o.Name, &o.Operator, &o.CreatedAt); err != nil {
+		if err := rows.Scan(&o.ID, &o.Name, &o.Operator, &o.PersonalOwnerID, &o.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, o)
