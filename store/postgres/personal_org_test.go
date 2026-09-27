@@ -39,3 +39,25 @@ func TestPersonalOrganizationIsUniqueAndOwned(t *testing.T) {
 		t.Fatalf("duplicate personal org persisted: %v %v", found, err)
 	}
 }
+
+func TestEnsurePersonalOrganizationIsIdempotent(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	users := pgstore.NewUsers(pool)
+	if err := users.Create(ctx, identity.User{ID: "person", Email: "person@example.test", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	orgs := pgstore.NewOrgs(pool)
+	first, err := orgs.EnsurePersonalForUser(ctx, "person")
+	if err != nil || first.PersonalOwnerID != "person" {
+		t.Fatalf("first personal organization: %+v %v", first, err)
+	}
+	second, err := orgs.EnsurePersonalForUser(ctx, "person")
+	if err != nil || second.ID != first.ID {
+		t.Fatalf("second personal organization: %+v %v", second, err)
+	}
+	memberships, err := pgstore.NewMemberships(pool).MembershipsOf(ctx, "person")
+	if err != nil || len(memberships) != 1 || memberships[0].OrgID != first.ID || memberships[0].Role != "owner" {
+		t.Fatalf("personal membership: %+v %v", memberships, err)
+	}
+}
