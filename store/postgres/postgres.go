@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/goat-io/authkit/identity"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -489,6 +490,35 @@ func (s *Orgs) CreatePersonalForUser(ctx context.Context, o identity.Org, userID
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// EnsurePersonalForUser returns the user's private organization, creating it
+// with an owner membership if needed. Callers may safely invoke it on every
+// sign-in; the unique owner index makes concurrent first sign-ins idempotent.
+func (s *Orgs) EnsurePersonalForUser(ctx context.Context, userID string) (identity.Org, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return identity.Org{}, err
+	}
+	defer tx.Rollback(ctx)
+	o := identity.Org{ID: "org_" + uuid.NewString(), Name: "Personal", PersonalOwnerID: userID, CreatedAt: time.Now().UTC()}
+	err = tx.QueryRow(ctx, `INSERT INTO authkit_orgs(id,name,personal_owner_id,created_at)
+		VALUES ($1,$2,$3,$4)
+		ON CONFLICT (personal_owner_id) WHERE personal_owner_id IS NOT NULL DO NOTHING
+		RETURNING id,name,created_at`, o.ID, o.Name, userID, o.CreatedAt).Scan(&o.ID, &o.Name, &o.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = tx.QueryRow(ctx, `SELECT id,name,created_at FROM authkit_orgs WHERE personal_owner_id=$1`, userID).Scan(&o.ID, &o.Name, &o.CreatedAt)
+	}
+	if err != nil {
+		return identity.Org{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO authkit_memberships(user_id,org_id,role) VALUES ($1,$2,'owner') ON CONFLICT (user_id,org_id) DO NOTHING`, userID, o.ID); err != nil {
+		return identity.Org{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return identity.Org{}, err
+	}
+	return o, nil
 }
 
 var _ identity.OrgStore = (*Orgs)(nil)
