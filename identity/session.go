@@ -93,6 +93,14 @@ func (s *SessionService) Resolve(ctx context.Context, token string) (Principal, 
 				p.OrgID = ms[0].OrgID // default acting org; the app may switch it
 				p.Roles = []string{ms[0].Role}
 			}
+			for _, m := range ms {
+				if m.Operator {
+					p.Operator = true
+					p.OrgID = m.OrgID
+					p.Roles = []string{m.Role}
+					break
+				}
+			}
 		}
 	}
 	return p, true
