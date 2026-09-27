@@ -34,23 +34,25 @@ func (k Kind) String() string {
 
 // Membership is a user's role within one organization.
 type Membership struct {
-	OrgID string `json:"orgId"`
-	Role  string `json:"role"`
+	OrgID    string `json:"orgId"`
+	Role     string `json:"role"`
+	Operator bool   `json:"operator,omitempty"`
 }
 
 // Principal is the authenticated caller. Both the user path and the machine path
 // resolve to this single shape so authorization code is uniform.
 type Principal struct {
 	Kind        Kind         `json:"kind"`
-	Subject     string       `json:"subject"`            // user id or runner id
-	OrgID       string       `json:"orgId,omitempty"`    // the organization being acted in
+	Subject     string       `json:"subject"`         // user id or runner id
+	OrgID       string       `json:"orgId,omitempty"` // the organization being acted in
 	Memberships []Membership `json:"memberships,omitempty"`
 	Roles       []string     `json:"roles,omitempty"`
 	Scopes      []string     `json:"scopes,omitempty"`
-	StepUp      bool         `json:"stepUp,omitempty"` // carries a step-up (MFA/passkey) claim
+	StepUp      bool         `json:"stepUp,omitempty"`   // carries a step-up (MFA/passkey) claim
+	Operator    bool         `json:"operator,omitempty"` // member of the designated operator organization
 }
 
-func (p Principal) IsAdmin() bool       { return p.Kind == KindAdmin }
+func (p Principal) IsAdmin() bool       { return p.Kind == KindAdmin || (p.Kind == KindUser && p.Operator) }
 func (p Principal) Authenticated() bool { return p.Kind != KindAnonymous }
 
 // HasScope reports whether the principal was granted scope s.

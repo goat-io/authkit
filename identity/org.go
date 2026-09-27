@@ -12,6 +12,7 @@ import (
 type Org struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
+	Operator  bool      `json:"operator"`
 	CreatedAt time.Time `json:"createdAt"`
 }
 

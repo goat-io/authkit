@@ -20,8 +20,11 @@ const Schema = `
 CREATE TABLE IF NOT EXISTS authkit_orgs (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL DEFAULT '',
+  is_operator BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE authkit_orgs ADD COLUMN IF NOT EXISTS is_operator BOOLEAN NOT NULL DEFAULT false;
+CREATE UNIQUE INDEX IF NOT EXISTS authkit_single_operator_org ON authkit_orgs(is_operator) WHERE is_operator;
 CREATE TABLE IF NOT EXISTS authkit_sso_connections (
   org_id TEXT PRIMARY KEY REFERENCES authkit_orgs(id) ON DELETE CASCADE,
   domain TEXT NOT NULL,
@@ -254,7 +257,7 @@ func (s *Memberships) EnsureMembership(ctx context.Context, userID, orgID, role 
 }
 
 func (s *Memberships) MembershipsOf(ctx context.Context, userID string) ([]identity.Membership, error) {
-	rows, err := s.pool.Query(ctx, `SELECT org_id, role FROM authkit_memberships WHERE user_id=$1 ORDER BY org_id`, userID)
+	rows, err := s.pool.Query(ctx, `SELECT m.org_id, m.role, COALESCE(o.is_operator,false) FROM authkit_memberships m LEFT JOIN authkit_orgs o ON o.id=m.org_id WHERE m.user_id=$1 ORDER BY m.org_id`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +265,7 @@ func (s *Memberships) MembershipsOf(ctx context.Context, userID string) ([]ident
 	var out []identity.Membership
 	for rows.Next() {
 		var m identity.Membership
-		if err := rows.Scan(&m.OrgID, &m.Role); err != nil {
+		if err := rows.Scan(&m.OrgID, &m.Role, &m.Operator); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -475,7 +478,7 @@ func (s *Orgs) Create(ctx context.Context, o identity.Org) error {
 
 func (s *Orgs) GetByID(ctx context.Context, id string) (identity.Org, bool, error) {
 	var o identity.Org
-	err := s.pool.QueryRow(ctx, `SELECT id, name, created_at FROM authkit_orgs WHERE id=$1`, id).Scan(&o.ID, &o.Name, &o.CreatedAt)
+	err := s.pool.QueryRow(ctx, `SELECT id, name, is_operator, created_at FROM authkit_orgs WHERE id=$1`, id).Scan(&o.ID, &o.Name, &o.Operator, &o.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return identity.Org{}, false, nil
 	}
@@ -486,7 +489,7 @@ func (s *Orgs) GetByID(ctx context.Context, id string) (identity.Org, bool, erro
 }
 
 func (s *Orgs) List(ctx context.Context) ([]identity.Org, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, name, created_at FROM authkit_orgs ORDER BY created_at`)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, is_operator, created_at FROM authkit_orgs ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -494,10 +497,40 @@ func (s *Orgs) List(ctx context.Context) ([]identity.Org, error) {
 	var out []identity.Org
 	for rows.Next() {
 		var o identity.Org
-		if err := rows.Scan(&o.ID, &o.Name, &o.CreatedAt); err != nil {
+		if err := rows.Scan(&o.ID, &o.Name, &o.Operator, &o.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, o)
 	}
 	return out, rows.Err()
+}
+
+var _ identity.OperatorOrgStore = (*Orgs)(nil)
+
+// SetOperator replaces the single operator designation atomically. A missing
+// target leaves the existing operator unchanged.
+func (s *Orgs) SetOperator(ctx context.Context, orgID string) (bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('authkit_operator_org'))`); err != nil {
+		return false, err
+	}
+	var exists bool
+	err = tx.QueryRow(ctx, `SELECT true FROM authkit_orgs WHERE id=$1 FOR UPDATE`, orgID).Scan(&exists)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE authkit_orgs SET is_operator=false WHERE is_operator`); err != nil {
+		return false, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE authkit_orgs SET is_operator=true WHERE id=$1`, orgID); err != nil {
+		return false, err
+	}
+	return true, tx.Commit(ctx)
 }
