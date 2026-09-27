@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -10,11 +11,14 @@ import (
 
 // Org is a tenant/organization.
 type Org struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Operator  bool      `json:"operator"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Operator        bool      `json:"operator"`
+	PersonalOwnerID string    `json:"personalOwnerId,omitempty"`
+	CreatedAt       time.Time `json:"createdAt"`
 }
+
+var ErrPersonalOrgExists = errors.New("user already has a personal organization")
 
 // OrgStore persists organizations. The Postgres adapter is in store/postgres.
 type OrgStore interface {
