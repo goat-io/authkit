@@ -235,7 +235,7 @@ func (s *Users) GetByEmail(ctx context.Context, email string) (identity.User, er
 		if err := rows.Err(); err != nil {
 			return identity.User{}, err
 		}
-		return identity.User{}, identity.ErrUserNotFound
+		return identity.User{}, errors.Join(identity.ErrUserNotFound, pgx.ErrNoRows)
 	}
 	var user identity.User
 	if err := rows.Scan(&user.ID, &user.Email, &user.DisplayName, &user.PasswordHash, &user.CreatedAt); err != nil {
