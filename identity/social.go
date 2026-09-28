@@ -5,8 +5,8 @@ import (
 	"errors"
 )
 
-// SocialIdentity is a verified OpenID Connect subject. Provider + Subject is
-// the stable account key; email is profile data and is never used to link users.
+// SocialIdentity is an OpenID Connect subject. Provider + Subject is the stable
+// account key; a provider-verified email may also identify an existing user.
 type SocialIdentity struct {
 	Provider      string
 	Subject       string
@@ -17,7 +17,7 @@ type SocialIdentity struct {
 
 var (
 	ErrSocialIdentity = errors.New("invalid social identity")
-	ErrEmailInUse     = errors.New("email already belongs to another user; sign in and link the social account")
+	ErrEmailInUse     = errors.New("email matches multiple users")
 )
 
 // SocialAccountStore atomically resolves or creates users for verified provider

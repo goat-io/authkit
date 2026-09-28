@@ -122,7 +122,7 @@ Configure a social provider by name in `SocialProviders` and register its callba
 
 For a customer's own identity provider, add an OIDC connection to `OrganizationSSO` with its organization ID, issuer URL, client ID, and secret. Users start at `/api/auth/sign-in/sso/{connection}`. Successful sign-in grants organization membership without replacing an existing role. The [organizations and SSO guide](docs/organizations.md) covers static connections, organization-managed registration, DNS proof, teams, and the application-owned admin endpoints.
 
-Social accounts are keyed by provider and subject. An existing account with the same email is **not** silently linked; the signed-in user must explicitly link the provider. Managed SSO can additionally require a provider-verified email in the organization's domain.
+Social accounts are keyed by provider and subject. On first sign-in, a provider-verified email joins the existing account with that email; an unverified email claim cannot do so. An already-linked provider subject keeps its existing account mapping. Managed SSO can additionally require a provider-verified email in the organization's domain.
 
 ## Built-in routes
 
