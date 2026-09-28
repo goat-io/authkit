@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/goat-io/authkit/identity"
@@ -13,8 +14,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// SocialAccounts maps provider subjects to local users. Email matches never
-// attach a provider to an existing user; linking requires an explicit call.
+// SocialAccounts maps provider subjects to local users. A provider-verified
+// email can claim the existing user with that email; unverified claims cannot.
 type SocialAccounts struct{ pool *pgxpool.Pool }
 
 func NewSocialAccounts(pool *pgxpool.Pool) *SocialAccounts { return &SocialAccounts{pool: pool} }
@@ -38,44 +39,73 @@ func (s *SocialAccounts) ResolveOrCreate(ctx context.Context, person identity.So
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	userID = "usr_" + base64.RawURLEncoding.EncodeToString(b)
 	email := ""
 	if person.EmailVerified {
-		email = person.Email
+		email = strings.ToLower(strings.TrimSpace(person.Email))
 	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback(ctx)
-	_, err = tx.Exec(ctx, `INSERT INTO authkit_users(id,email,display_name,password_hash,created_at) VALUES ($1,NULLIF($2,''),$3,'',$4)`, userID, email, person.DisplayName, time.Now().UTC())
-	if err != nil {
-		if uniqueConstraint(err, "authkit_users_email_key") {
-			_ = tx.Rollback(ctx)
-			// A concurrent sign-in for the same provider may have won the race.
-			if lookupErr := s.pool.QueryRow(ctx, `SELECT user_id FROM authkit_social_accounts WHERE provider=$1 AND subject=$2`, person.Provider, person.Subject).Scan(&userID); lookupErr == nil {
-				return userID, nil
-			} else if !errors.Is(lookupErr, pgx.ErrNoRows) {
-				return "", lookupErr
-			}
-			return "", identity.ErrEmailInUse
+	for attempt := 0; attempt < 3; attempt++ {
+		tx, err := s.pool.Begin(ctx)
+		if err != nil {
+			return "", err
 		}
-		return "", err
-	}
-	_, err = tx.Exec(ctx, `INSERT INTO authkit_social_accounts(provider,subject,user_id) VALUES ($1,$2,$3)`, person.Provider, person.Subject, userID)
-	if err != nil {
-		if uniqueConstraint(err, "authkit_social_accounts_pkey") {
+		userID = ""
+		if email != "" {
+			// Reject ambiguous legacy addresses rather than choosing an account.
+			rows, queryErr := tx.Query(ctx, `SELECT id FROM authkit_users WHERE lower(email)=$1 LIMIT 2`, email)
+			if queryErr != nil {
+				_ = tx.Rollback(ctx)
+				return "", queryErr
+			}
+			for rows.Next() {
+				var candidate string
+				if err := rows.Scan(&candidate); err != nil {
+					rows.Close()
+					_ = tx.Rollback(ctx)
+					return "", err
+				}
+				if userID != "" {
+					rows.Close()
+					_ = tx.Rollback(ctx)
+					return "", identity.ErrEmailInUse
+				}
+				userID = candidate
+			}
+			queryErr = rows.Err()
+			rows.Close()
+			if queryErr != nil {
+				_ = tx.Rollback(ctx)
+				return "", queryErr
+			}
+		}
+		if userID == "" {
+			userID = "usr_" + base64.RawURLEncoding.EncodeToString(b)
+			_, err = tx.Exec(ctx, `INSERT INTO authkit_users(id,email,display_name,password_hash,created_at) VALUES ($1,NULLIF($2,''),$3,'',$4)`, userID, email, person.DisplayName, time.Now().UTC())
+			if err != nil {
+				_ = tx.Rollback(ctx)
+				if email != "" && uniqueConstraint(err, "authkit_users_email_key") {
+					// Another verified sign-in created the user. Read it afresh.
+					continue
+				}
+				return "", err
+			}
+		}
+		tag, err := tx.Exec(ctx, `INSERT INTO authkit_social_accounts(provider,subject,user_id) VALUES ($1,$2,$3) ON CONFLICT (provider,subject) DO NOTHING`, person.Provider, person.Subject, userID)
+		if err != nil {
 			_ = tx.Rollback(ctx)
-			// Another request created this account concurrently. Use that user.
+			return "", err
+		}
+		if tag.RowsAffected() == 0 {
+			_ = tx.Rollback(ctx)
+			// The stable provider subject takes precedence over an email claim.
 			err = s.pool.QueryRow(ctx, `SELECT user_id FROM authkit_social_accounts WHERE provider=$1 AND subject=$2`, person.Provider, person.Subject).Scan(&userID)
 			return userID, err
 		}
-		return "", err
+		if err := tx.Commit(ctx); err != nil {
+			return "", err
+		}
+		return userID, nil
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return "", err
-	}
-	return userID, nil
+	return "", identity.ErrEmailInUse
 }
 
 func (s *SocialAccounts) Link(ctx context.Context, userID string, person identity.SocialIdentity) error {

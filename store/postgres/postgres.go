@@ -226,11 +226,25 @@ func (s *Users) scan(row pgx.Row) (identity.User, error) {
 }
 
 func (s *Users) GetByEmail(ctx context.Context, email string) (identity.User, error) {
-	u, err := s.scan(s.pool.QueryRow(ctx, `SELECT id, COALESCE(email,''), display_name, password_hash, created_at FROM authkit_users WHERE email=$1`, email))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return u, errors.Join(identity.ErrUserNotFound, err)
+	rows, err := s.pool.Query(ctx, `SELECT id, COALESCE(email,''), display_name, password_hash, created_at FROM authkit_users WHERE lower(email)=lower($1) LIMIT 2`, email)
+	if err != nil {
+		return identity.User{}, err
 	}
-	return u, err
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return identity.User{}, err
+		}
+		return identity.User{}, identity.ErrUserNotFound
+	}
+	var user identity.User
+	if err := rows.Scan(&user.ID, &user.Email, &user.DisplayName, &user.PasswordHash, &user.CreatedAt); err != nil {
+		return identity.User{}, err
+	}
+	if rows.Next() {
+		return identity.User{}, identity.ErrAmbiguousEmail
+	}
+	return user, rows.Err()
 }
 
 func (s *Users) GetByID(ctx context.Context, id string) (identity.User, error) {

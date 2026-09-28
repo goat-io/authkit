@@ -9,6 +9,7 @@ import (
 )
 
 var ErrUserNotFound = errors.New("user not found")
+var ErrAmbiguousEmail = errors.New("email matches multiple users")
 
 // user.go — the human side of authkit. A User is a person; they authenticate with
 // a factor (password here; WebAuthn/MFA are additional factors layered on top) and

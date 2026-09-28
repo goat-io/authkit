@@ -304,7 +304,7 @@ func (a *Auth) finishSocial(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, err := a.Social.Resolve(r.Context(), person)
 	if errors.Is(err, identity.ErrEmailInUse) {
-		http.Error(w, "email already belongs to another account; sign in and link this provider", http.StatusConflict)
+		http.Error(w, "email matches multiple accounts; contact support", http.StatusConflict)
 		return
 	}
 	if err != nil {
